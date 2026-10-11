@@ -27,7 +27,7 @@ import {
   toGlobalHistoryDisplayEntries,
 } from '../domain/globalHistory';
 import type { Host, RemoteHistoryEntry, ShellHistoryEntry } from '../domain/models';
-import { removeCommandHistoryEntry } from './terminal/autocomplete/commandHistoryStore';
+import { removeCommandHistoryEntry } from '../application/state/commandHistoryStore';
 import { cn } from '../lib/utils';
 import { ConfirmDialog } from './ui/confirm-dialog';
 import type { RemoteHistoryHostState } from '../application/state/useRemoteHistoryState';

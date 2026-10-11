@@ -17,7 +17,7 @@ import {
 } from "./promptDetector";
 import { getCompletions, parseCommandLine, type CompletionSuggestion } from "./completionEngine";
 import type { Snippet } from "../../../domain/models";
-import { recordCommand } from "./commandHistoryStore";
+import { recordCommand, subscribeCommandHistoryCleared } from "../../../application/state/commandHistoryStore";
 import { seedLocalShellHistoryFromHistfiles } from "./localShellHistorySeed";
 import { shellEscape } from "./completionEngine";
 import { preloadCommonSpecs } from "./figSpecLoader";
@@ -487,6 +487,12 @@ export function useTerminalAutocomplete(
       prev.popupVisible || prev.suggestions.length > 0 ? { ...EMPTY_STATE } : prev,
     );
   }, []);
+
+  // Drop visible suggestions/ghosts when command history is cleared, including
+  // a clear performed in another renderer (e.g. the main window while this
+  // detached popup is open). Otherwise an already-rendered history row could
+  // still be accepted and re-recorded after the clear.
+  useEffect(() => subscribeCommandHistoryCleared(clearState), [clearState]);
 
   /**
    * Reconcile the visible popup with the newly edited input synchronously.

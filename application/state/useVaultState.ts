@@ -81,7 +81,7 @@ import {
 } from "./notesStore";
 import { commitVaultNotesWrite } from "./vaultNotesPersistence";
 import { publishShellHistorySnapshot } from "./shellHistoryStore";
-import { clearHistory as clearAutocompleteHistory } from "../../components/terminal/autocomplete/commandHistoryStore";
+import { clearHistory as clearAutocompleteHistory } from "./commandHistoryStore";
 import { setVaultInitialized } from "./vaultInitStore";
 import { notify } from "../notification";
 import {
