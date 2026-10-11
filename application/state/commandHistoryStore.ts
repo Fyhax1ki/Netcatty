@@ -9,7 +9,10 @@
  */
 
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
-import { STORAGE_KEY_COMMAND_HISTORY } from "../../infrastructure/config/storageKeys";
+import {
+  STORAGE_KEY_COMMAND_HISTORY,
+  STORAGE_KEY_COMMAND_HISTORY_CLEARED,
+} from "../../infrastructure/config/storageKeys";
 
 const STORAGE_KEY = STORAGE_KEY_COMMAND_HISTORY;
 const MAX_ENTRIES = 10000;
@@ -151,6 +154,23 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 export function getCommandHistoryClearGeneration(): number {
   if (knownClearGeneration === null) loadStore();
   return knownClearGeneration ?? 0;
+}
+
+/**
+ * Record that the user explicitly cleared all command history.
+ *
+ * Histfile seeding honors this tombstone: a clear is a user decision to delete
+ * locally recorded history, so a later first-time import must not restore the
+ * commands the user deleted (a pre-clear in-flight check alone cannot catch a
+ * clear that happened before the import started).
+ */
+export function markCommandHistoryCleared(): void {
+  localStorageAdapter.writeBoolean(STORAGE_KEY_COMMAND_HISTORY_CLEARED, true);
+}
+
+/** True once the user has cleared all command history at least once. */
+export function hasCommandHistoryBeenCleared(): boolean {
+  return localStorageAdapter.readBoolean(STORAGE_KEY_COMMAND_HISTORY_CLEARED) === true;
 }
 
 type CommandHistoryClearedListener = () => void;

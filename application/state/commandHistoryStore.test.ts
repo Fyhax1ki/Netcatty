@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { STORAGE_KEY_COMMAND_HISTORY } from "../../infrastructure/config/storageKeys";
+import {
+  STORAGE_KEY_COMMAND_HISTORY,
+  STORAGE_KEY_COMMAND_HISTORY_CLEARED,
+} from "../../infrastructure/config/storageKeys";
 
 type StorageEventLike = { key: string | null; newValue: string | null };
 type StorageListener = (event: StorageEventLike) => void;
@@ -68,6 +71,8 @@ const {
   clearHistory,
   flushCommandHistoryStore,
   getCommandHistoryClearGeneration,
+  hasCommandHistoryBeenCleared,
+  markCommandHistoryCleared,
   queryHistory,
   recordCommand,
   subscribeCommandHistoryCleared,
@@ -209,4 +214,58 @@ test("a histfile import that started before a clear is discarded", async () => {
   // commands.
   assert.equal(await seedLocalShellHistoryFromHistfiles(hostId, "macos"), 0);
   assert.equal(queryHistory("echo", { hostId, limit: 5 }).length, 0);
+});
+
+test("markCommandHistoryCleared persists a tombstone for histfile seeding", () => {
+  storage.clear();
+  assert.equal(hasCommandHistoryBeenCleared(), false);
+
+  markCommandHistoryCleared();
+
+  assert.equal(hasCommandHistoryBeenCleared(), true);
+  assert.equal(storage.get(STORAGE_KEY_COMMAND_HISTORY_CLEARED), "true");
+});
+
+test("a first-time histfile import is skipped once history has been cleared", async () => {
+  storage.clear();
+  clearHistory();
+  markCommandHistoryCleared();
+
+  const hostId = `local-seed-tombstone-${Date.now()}`;
+  (window as unknown as { netcatty?: unknown }).netcatty = {
+    getHomeDir: async () => "/home/demo",
+    readLocalFile: async () => ": 1700000000:0;echo resurrected\n",
+  };
+
+  assert.equal(await seedLocalShellHistoryFromHistfiles(hostId, "macos"), 0);
+  assert.equal(queryHistory("echo", { hostId, limit: 5 }).length, 0);
+});
+
+test("an external clear also drops in-memory compose-bar recall", async () => {
+  const composeBar = await import("./composeBarHistoryStore.ts");
+  storage.clear();
+  clearHistory();
+  composeBar.pruneComposeBarHistory([]);
+  composeBar.recordComposeBarHistory("session-1", "echo compose");
+  assert.deepEqual(composeBar.getComposeBarHistory("session-1"), ["echo compose"]);
+
+  let notified = 0;
+  const unsubscribe = composeBar.subscribeComposeBarHistoryCleared(() => {
+    notified += 1;
+  });
+
+  // Simulate another renderer clearing command history. The compose-bar store
+  // follows the same clear event, so a detached popup drops its recall too.
+  const cleared = JSON.stringify({
+    entries: [],
+    version: 1,
+    clearGeneration: getCommandHistoryClearGeneration() + 1,
+  });
+  storage.set(COMMAND_HISTORY_STORAGE_KEY, cleared);
+  dispatchStorageEvent(COMMAND_HISTORY_STORAGE_KEY, cleared);
+
+  assert.deepEqual(composeBar.getComposeBarHistory("session-1"), []);
+  assert.equal(notified, 1);
+
+  unsubscribe();
 });

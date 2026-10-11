@@ -23,6 +23,7 @@ import { localStorageAdapter } from "../../../infrastructure/persistence/localSt
 import {
   flushCommandHistoryStore,
   getCommandHistoryClearGeneration,
+  hasCommandHistoryBeenCleared,
   recordCommand,
 } from "../../../application/state/commandHistoryStore";
 
@@ -97,6 +98,14 @@ async function seedLocalShellHistoryFromHistfilesOnce(
 ): Promise<number> {
   if (!hostId || alreadySeeded(hostId)) return 0;
 
+  // A clear is a user decision to delete locally recorded history. Never
+  // re-import histfiles for a host that was not seeded before that clear, or
+  // the deleted commands would reappear on the next Local Terminal open.
+  if (hasCommandHistoryBeenCleared()) {
+    markSeeded(hostId);
+    return 0;
+  }
+
   // Capture the clear generation before the bridge reads so a clear that lands
   // while they are in flight can be detected afterwards.
   const startClearGeneration = getCommandHistoryClearGeneration();
@@ -122,7 +131,10 @@ async function seedLocalShellHistoryFromHistfilesOnce(
   // The user cleared history while the histfile reads were in flight. Discard
   // the import and mark this host seeded so a later Local Terminal open cannot
   // resurrect the commands that were just deleted.
-  if (getCommandHistoryClearGeneration() !== startClearGeneration) {
+  if (
+    hasCommandHistoryBeenCleared()
+    || getCommandHistoryClearGeneration() !== startClearGeneration
+  ) {
     markSeeded(hostId);
     return 0;
   }

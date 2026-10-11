@@ -1,6 +1,10 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { navigateComposeBarHistory, type ComposeBarHistoryDirection } from '../../domain/composeBarHistory';
-import { getComposeBarHistory, createComposeBarHistoryRecorder } from './composeBarHistoryStore';
+import {
+  getComposeBarHistory,
+  createComposeBarHistoryRecorder,
+  subscribeComposeBarHistoryCleared,
+} from './composeBarHistoryStore';
 
 export function useComposeBarHistory(sessionId: string, restoreDraft?: (draft: string) => void) {
   const cursor = useRef<{ index: number; draft: string; entries?: readonly string[] }>({ index: Infinity, draft: '' });
@@ -15,6 +19,10 @@ export function useComposeBarHistory(sessionId: string, restoreDraft?: (draft: s
     if (cursor.current.entries) restoreDraft?.(cursor.current.draft);
     reset();
   }, [reset, restoreDraft, sessionId]);
+
+  // Drop any cached history walk when all command history is cleared, so a
+  // recalled compose-bar entry cannot be resent (and re-recorded) afterwards.
+  useEffect(() => subscribeComposeBarHistoryCleared(reset), [reset]);
 
   const prepareRecord = useCallback(() => createComposeBarHistoryRecorder(sessionId), [sessionId]);
 
