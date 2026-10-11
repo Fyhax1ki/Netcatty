@@ -20,9 +20,23 @@ export function useComposeBarHistory(sessionId: string, restoreDraft?: (draft: s
     reset();
   }, [reset, restoreDraft, sessionId]);
 
-  // Drop any cached history walk when all command history is cleared, so a
-  // recalled compose-bar entry cannot be resent (and re-recorded) afterwards.
-  useEffect(() => subscribeComposeBarHistoryCleared(reset), [reset]);
+  /**
+   * Restore the pre-walk draft and drop the cached history walk.
+   *
+   * While the user is in an ArrowUp walk the textarea shows the recalled
+   * command, so resetting the cursor alone would leave a deleted command ready
+   * for Enter. Put the saved draft back first, exactly like the session-change
+   * path above.
+   */
+  const handleHistoryCleared = useCallback(() => {
+    if (cursor.current.entries) restoreDraft?.(cursor.current.draft);
+    reset();
+  }, [reset, restoreDraft]);
+
+  useEffect(
+    () => subscribeComposeBarHistoryCleared(handleHistoryCleared),
+    [handleHistoryCleared],
+  );
 
   const prepareRecord = useCallback(() => createComposeBarHistoryRecorder(sessionId), [sessionId]);
 
