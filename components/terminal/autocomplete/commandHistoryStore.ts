@@ -67,6 +67,13 @@ function saveStore(store: HistoryStore): void {
   }, 500);
 }
 
+function cancelPendingSave(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+}
+
 /**
  * Flush any pending debounced history write immediately.
  * Used after bulk imports (e.g. local histfile seeding) so a seed-complete
@@ -75,11 +82,30 @@ function saveStore(store: HistoryStore): void {
  */
 export function flushCommandHistoryStore(): boolean {
   if (!cachedStore) return true;
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-  }
+  cancelPendingSave();
   return persistStoreNow(cachedStore);
+}
+
+/**
+ * Drop this renderer's module-local cache and any debounced write when another
+ * renderer changes the persisted history.
+ *
+ * Detached terminal popups share localStorage with the main window but keep
+ * independent module state. Without this invalidation a popup that already
+ * loaded history would keep suggesting deleted commands, and its next
+ * `recordCommand` could re-persist the stale snapshot over the clear.
+ */
+function invalidateCommandHistoryCacheFromExternalWrite(): void {
+  cancelPendingSave();
+  cachedStore = null;
+}
+
+// The native `storage` event fires in *other* same-origin windows (main window
+// and detached terminal popups) when a key changes there.
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("storage", (event) => {
+    if (event.key === STORAGE_KEY) invalidateCommandHistoryCacheFromExternalWrite();
+  });
 }
 
 /**
@@ -149,10 +175,7 @@ export function removeCommandHistoryEntry(command: string, hostId: string): bool
   if (nextEntries.length === store.entries.length) return false;
 
   store.entries = nextEntries;
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-  }
+  cancelPendingSave();
   return persistStoreNow(store);
 }
 
@@ -435,5 +458,8 @@ export function clearHistory(hostId?: string): void {
   } else {
     store.entries = [];
   }
-  saveStore(store);
+  // Destructive clears must be durable: cancel any pending debounced write and
+  // persist synchronously so a later stale flush cannot restore the entries.
+  cancelPendingSave();
+  persistStoreNow(store);
 }

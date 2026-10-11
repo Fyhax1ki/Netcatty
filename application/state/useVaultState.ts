@@ -81,6 +81,7 @@ import {
 } from "./notesStore";
 import { commitVaultNotesWrite } from "./vaultNotesPersistence";
 import { publishShellHistorySnapshot } from "./shellHistoryStore";
+import { clearHistory as clearAutocompleteHistory } from "../../components/terminal/autocomplete/commandHistoryStore";
 import { setVaultInitialized } from "./vaultInitStore";
 import { notify } from "../notification";
 import {
@@ -1223,6 +1224,17 @@ export const useVaultState = () => {
     publishShellHistorySnapshot([]);
   }, []);
 
+  /**
+   * Clear every locally recorded command history: the global shell history and
+   * the terminal autocomplete history. The autocomplete store persists the
+   * clear synchronously and fans invalidation out to other renderers through
+   * its own `storage` listener, so detached terminal popups drop their cache.
+   */
+  const clearAllCommandHistory = useCallback(() => {
+    clearShellHistory();
+    clearAutocompleteHistory();
+  }, [clearShellHistory]);
+
   const removeShellHistoryEntry = useCallback((entryId: string) => {
     setShellHistory((prev) => {
       const updated = removeGlobalHistoryEntry(prev, entryId);
@@ -2159,6 +2171,7 @@ export const useVaultState = () => {
     updateGroupConfigs,
     addShellHistoryEntry,
     clearShellHistory,
+    clearAllCommandHistory,
     removeShellHistoryEntry,
     addConnectionLog,
     updateConnectionLog,

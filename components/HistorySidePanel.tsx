@@ -27,11 +27,7 @@ import {
   toGlobalHistoryDisplayEntries,
 } from '../domain/globalHistory';
 import type { Host, RemoteHistoryEntry, ShellHistoryEntry } from '../domain/models';
-import {
-  clearHistory,
-  flushCommandHistoryStore,
-  removeCommandHistoryEntry,
-} from './terminal/autocomplete/commandHistoryStore';
+import { removeCommandHistoryEntry } from './terminal/autocomplete/commandHistoryStore';
 import { cn } from '../lib/utils';
 import { ConfirmDialog } from './ui/confirm-dialog';
 import type { RemoteHistoryHostState } from '../application/state/useRemoteHistoryState';
@@ -217,10 +213,8 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   }, [globalEntries, onDeleteGlobalEntry, scope, sourceEntries]);
 
   const handleClearAll = useCallback(() => {
-    // Clear the autocomplete store and the persisted global shell history.
-    clearHistory();
-    // Persist the autocomplete clear immediately instead of waiting for the debounce timer.
-    flushCommandHistoryStore();
+    // The application-state action clears both the global shell history and the
+    // autocomplete history, and fans the clear out to every renderer.
     onClearGlobalHistory?.();
     setClearAllOpen(false);
     setSelectedEntryId(null);

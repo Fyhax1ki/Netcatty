@@ -63,7 +63,7 @@ export type VaultSnapshotActions = Pick<
   | 'updateHostLastConnected'
   | 'addShellHistoryEntry'
   | 'removeShellHistoryEntry'
-  | 'clearShellHistory'
+  | 'clearAllCommandHistory'
 >;
 
 const EMPTY_HOSTS: readonly Host[] = Object.freeze([]);
