@@ -70,6 +70,15 @@ function loadStore(): HistoryStore {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function persistStoreNow(store: HistoryStore): boolean {
+  // A peer clear is visible in storage before its queued event is handled.
+  // Never flush a cached pre-clear snapshot over that newer empty store.
+  const persisted = localStorageAdapter.read<HistoryStore>(STORAGE_KEY);
+  if (persisted && readClearGeneration(persisted) > readClearGeneration(store)) {
+    cachedStore = persisted;
+    knownClearGeneration = readClearGeneration(persisted);
+    notifyCommandHistoryCleared();
+    return true;
+  }
   const ok = localStorageAdapter.write(STORAGE_KEY, store);
   if (ok) return true;
   // Storage full — evict lowest scored entries (not just oldest by insertion)
@@ -112,15 +121,14 @@ export function flushCommandHistoryStore(): boolean {
  * React to a write performed by another renderer (main window or a detached
  * terminal popup).
  *
- * The module-local cache and any debounced write are dropped so a stale
- * snapshot cannot resurrect deleted commands. A bumped clear generation also
- * notifies live autocomplete controllers so they drop visible suggestions and
- * abort in-flight completions.
+ * A bumped clear generation drops the cache and pending save, then notifies
+ * live autocomplete controllers. Ordinary peer writes must not cancel a local
+ * command that is still waiting for its debounced save.
  */
-function applyExternalCommandHistoryWrite(rawNewValue: string | null): void {
-  cancelPendingSave();
-  cachedStore = null;
-
+function applyExternalCommandHistoryWrite(
+  rawNewValue: string | null,
+  rawOldValue: string | null,
+): void {
   let incomingGeneration: number | null = null;
   if (rawNewValue) {
     try {
@@ -130,12 +138,28 @@ function applyExternalCommandHistoryWrite(rawNewValue: string | null): void {
     }
   }
 
-  const previousGeneration = knownClearGeneration ?? 0;
+  let previousGeneration = knownClearGeneration;
+  if (previousGeneration === null) {
+    // A fresh popup can have compose recall before its first autocomplete query.
+    // The event's old value is its baseline, even after an earlier global clear.
+    try {
+      previousGeneration = rawOldValue
+        ? readClearGeneration(JSON.parse(rawOldValue) as HistoryStore)
+        : 0;
+    } catch {
+      previousGeneration = 0;
+    }
+  }
   if (incomingGeneration !== null && incomingGeneration > previousGeneration) {
+    cancelPendingSave();
+    cachedStore = null;
     knownClearGeneration = incomingGeneration;
     notifyCommandHistoryCleared();
-  } else if (incomingGeneration !== null && knownClearGeneration === null) {
-    knownClearGeneration = incomingGeneration;
+  } else {
+    if (!saveTimer) cachedStore = null;
+    if (incomingGeneration !== null && knownClearGeneration === null) {
+      knownClearGeneration = incomingGeneration;
+    }
   }
 }
 
@@ -143,7 +167,7 @@ function applyExternalCommandHistoryWrite(rawNewValue: string | null): void {
 // and detached terminal popups) when a key changes there.
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("storage", (event) => {
-    if (event.key === STORAGE_KEY) applyExternalCommandHistoryWrite(event.newValue);
+    if (event.key === STORAGE_KEY) applyExternalCommandHistoryWrite(event.newValue, event.oldValue);
   });
 }
 

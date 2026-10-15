@@ -6,7 +6,7 @@ import {
   STORAGE_KEY_COMMAND_HISTORY_CLEARED,
 } from "../../infrastructure/config/storageKeys";
 
-type StorageEventLike = { key: string | null; newValue: string | null };
+type StorageEventLike = { key: string | null; newValue: string | null; oldValue: string | null };
 type StorageListener = (event: StorageEventLike) => void;
 
 type DeferredRead = { resolve: (value: string) => void };
@@ -37,7 +37,7 @@ function installLocalStorage(): Map<string, string> {
  * The store registers its cross-window `storage` listener at module load, so
  * the DOM globals must exist before the dynamic imports below.
  */
-function installWindow(): (key: string, newValue: string | null) => void {
+function installWindow(): (key: string, newValue: string | null, oldValue?: string | null) => void {
   const listeners = new Set<StorageListener>();
   Object.defineProperty(globalThis, "window", {
     value: {
@@ -51,8 +51,8 @@ function installWindow(): (key: string, newValue: string | null) => void {
     },
     configurable: true,
   });
-  return (key: string, newValue: string | null) => {
-    for (const listener of listeners) listener({ key, newValue });
+  return (key: string, newValue: string | null, oldValue: string | null = null) => {
+    for (const listener of listeners) listener({ key, newValue, oldValue });
   };
 }
 
@@ -94,6 +94,63 @@ function readPersistedGeneration(): number {
   const parsed = JSON.parse(raw) as { clearGeneration?: number };
   return typeof parsed.clearGeneration === "number" ? parsed.clearGeneration : 0;
 }
+
+test("a fresh popup keeps compose recall on an ordinary peer write after an earlier clear", async () => {
+  const baseline = JSON.stringify({ entries: [], version: 1, clearGeneration: 3 });
+  storage.set(COMMAND_HISTORY_STORAGE_KEY, baseline);
+  const composeBar = await import("./composeBarHistoryStore.ts");
+  composeBar.recordComposeBarHistory("fresh-popup", "echo popup-current-command");
+
+  // No autocomplete query has loaded this renderer's command-history store.
+  const recorded = JSON.stringify({
+    entries: [{ command: "peer-command", hostId: "host-2", os: "linux", frequency: 1, createdAt: 1, lastUsedAt: 1 }],
+    version: 1, clearGeneration: 3,
+  });
+  dispatchStorageEvent(COMMAND_HISTORY_STORAGE_KEY, recorded, baseline);
+  assert.deepEqual(composeBar.getComposeBarHistory("fresh-popup"), ["echo popup-current-command"]);
+
+  const cleared = JSON.stringify({ entries: [], version: 1, clearGeneration: 4 });
+  storage.set(COMMAND_HISTORY_STORAGE_KEY, cleared);
+  dispatchStorageEvent(COMMAND_HISTORY_STORAGE_KEY, cleared, recorded);
+  assert.deepEqual(composeBar.getComposeBarHistory("fresh-popup"), []);
+});
+
+test("a stale pending write cannot overwrite a peer clear before its storage event arrives", () => {
+  clearHistory();
+  recordCommand("old-command", "host-1");
+  flushCommandHistoryStore();
+  recordCommand("pending-before-clear", "host-1");
+
+  // localStorage is already updated in the peer, but this renderer has not yet
+  // processed its queued storage event when the pending save runs.
+  const generation = readPersistedGeneration() + 1;
+  storage.set(COMMAND_HISTORY_STORAGE_KEY, JSON.stringify({
+    entries: [], version: 1, clearGeneration: generation,
+  }));
+  flushCommandHistoryStore();
+  assert.deepEqual(readPersistedCommands(), []);
+  assert.equal(readPersistedGeneration(), generation);
+  assert.deepEqual(queryHistory("old", { hostId: "host-1" }), []);
+
+  recordCommand("new-after-clear", "host-1");
+  flushCommandHistoryStore();
+  assert.deepEqual(readPersistedCommands(), ["new-after-clear"]);
+});
+
+test("an ordinary peer write does not cancel a locally pending command", async () => {
+  clearHistory();
+  recordCommand("local-pending-command", "host-1");
+  const before = storage.get(COMMAND_HISTORY_STORAGE_KEY)!;
+  const ordinary = JSON.stringify({
+    entries: [{ command: "peer-command", hostId: "host-2", os: "linux", frequency: 1, createdAt: 1, lastUsedAt: 1 }],
+    version: 1, clearGeneration: getCommandHistoryClearGeneration(),
+  });
+  storage.set(COMMAND_HISTORY_STORAGE_KEY, ordinary);
+  dispatchStorageEvent(COMMAND_HISTORY_STORAGE_KEY, ordinary, before);
+
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  assert.ok(readPersistedCommands().includes("local-pending-command"));
+});
 
 test("an external clear invalidates the cached history and cannot be resurrected", () => {
   storage.clear();
